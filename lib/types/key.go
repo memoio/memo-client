@@ -3,9 +3,8 @@ package types
 type KeyType = byte
 
 const (
-	// RSA is an enum for the supported RSA key type
 	RSA KeyType = iota
-	// Secp256k1 is an enum for the supported Secp256k1 key type
+
 	Secp256k1
 	BLS
 	PDP

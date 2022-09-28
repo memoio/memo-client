@@ -33,6 +33,8 @@ func main() {
 	local = append(local, cmd.PutObjectCmd)
 	local = append(local, cmd.QueryCmd)
 	local = append(local, cmd.GetBalanceInfoCmd)
+	local = append(local, cmd.InitCmd)
+	local = append(local, cmd.WalletCmd)
 
 	app := &cli.App{
 		Name:  "memo-client",
