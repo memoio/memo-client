@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/hex"
 	"log"
+	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/memoio/memo-client/lib"
 	"github.com/memoio/memo-client/lib/crypto/signature"
 	"github.com/memoio/memo-client/lib/repo"
 	"github.com/memoio/memo-client/lib/types"
 	"github.com/memoio/memo-client/lib/utils"
 	"github.com/memoio/memo-client/wallet"
+	"github.com/minio/minio-go/v7"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
 	"lukechampine.com/blake3"
@@ -19,16 +22,9 @@ import (
 var InitCmd = &cli.Command{
 	Name:  "init",
 	Usage: "init a memo client",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:  "repo",
-			Usage: "key repo",
-			Value: "./",
-		},
-	},
 	Action: func(ctx *cli.Context) error {
 		log.Println("Initializing memo client")
-		repoDir := ctx.String("repo")
+		repoDir := "./"
 
 		exist, err := repo.Exists(repoDir)
 		if err != nil {
@@ -54,7 +50,7 @@ var InitCmd = &cli.Command{
 		err = create(ctx.Context, rep, pw, sk)
 
 		if err != nil {
-			log.Printf ("fail initializing node %s", err)
+			log.Printf("fail initializing node %s", err)
 			return err
 		}
 		return nil
@@ -106,6 +102,11 @@ func create(ctx context.Context, r repo.Repo, password, sk string) error {
 		log.Println("import wallet address: ", wa)
 	}
 
+	err = os.WriteFile("address", []byte(wa.String()), 0600)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
 	log.Println("generating bls key...")
 
 	blsSeed := make([]byte, len(sBytes)+1)
@@ -124,6 +125,44 @@ func create(ctx context.Context, r repo.Repo, password, sk string) error {
 
 	log.Println("genenrated bls key: ", blsAddr.String())
 
-	return nil
+	log.Println("init bucket")
+	client, err := lib.New()
+	if err != nil {
+		return err
+	}
 
+	log.Println(wa.String())
+	err = client.MakeBucket(ctx, wa.String(), minio.MakeBucketOptions{})
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	return nil
 }
+
+// var InitBucketCmd = &cli.Command{
+// 	Name:  "initb",
+// 	Usage: "init bucket",
+// 	Action: func(ctx *cli.Context) error {
+// 		buf, err := os.ReadFile("address")
+// 		if err != nil {
+// 			return err
+// 		}
+
+// 		bucketName := string(buf)
+// 		client, err := lib.New()
+// 		if err != nil {
+// 			return err
+// 		}
+
+// 		log.Println(bucketName)
+// 		err = client.MakeBucket(ctx.Context, bucketName, minio.MakeBucketOptions{})
+// 		if err != nil {
+// 			log.Println(err)
+// 			return err
+// 		}
+
+// 		return nil
+// 	},
+// }

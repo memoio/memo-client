@@ -14,7 +14,7 @@ const ChecksumHashLength = 4
 
 const MaxAddressStringLength = AddrPrefixLen + 94
 
-type Address struct{ str string }
+type  Address struct{ str string }
 
 var Undef = Address{}
 

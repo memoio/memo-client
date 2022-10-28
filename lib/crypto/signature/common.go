@@ -1,11 +1,15 @@
 package signature
 
 import (
+	"bytes"
+
 	"github.com/memoio/memo-client/lib/crypto/signature/bls"
 	"github.com/memoio/memo-client/lib/crypto/signature/common"
 	"github.com/memoio/memo-client/lib/crypto/signature/secp256k1"
 	"github.com/memoio/memo-client/lib/types"
+	"github.com/memoio/memo-client/lib/utils"
 	"golang.org/x/xerrors"
+	"lukechampine.com/blake3"
 )
 
 func GenerateKey(typ types.KeyType) (common.PrivKey, error) {
@@ -38,4 +42,55 @@ func ParsePrivateKey(privatekey []byte, typ types.KeyType) (common.PrivKey, erro
 		return nil, xerrors.Errorf("%d is %w", typ, common.ErrBadKeyType)
 	}
 	return privkey, nil
+}
+
+// verify related
+
+func ParsePubByte(pubbyte []byte) (common.PubKey, error) {
+	var pubKey common.PubKey
+	plen := len(pubbyte)
+	switch plen {
+	case 33, 65:
+		pubKey = &secp256k1.PublicKey{}
+		err := pubKey.Deserialize(pubbyte)
+		if err != nil {
+			return nil, err
+		}
+	case 48:
+		pubKey = &bls.PublicKey{}
+		err := pubKey.Deserialize(pubbyte)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, common.ErrBadKeyType
+	}
+	return pubKey, nil
+}
+
+func Verify(pubBytes []byte, data, sig []byte) (bool, error) {
+	plen := len(pubBytes)
+
+	switch plen {
+	case 20:
+		// for eth address
+		if len(data) != 32 {
+			msg := blake3.Sum256(data)
+			data = msg[:]
+		}
+
+		rePub, err := secp256k1.EcRecover(data, sig)
+		if err != nil {
+			return false, err
+		}
+
+		return bytes.Equal(pubBytes, utils.ToEthAddress(rePub)), nil
+	default:
+		pk, err := ParsePubByte(pubBytes)
+		if err != nil {
+			return false, err
+		}
+
+		return pk.Verify(data, sig)
+	}
 }

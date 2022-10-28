@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/memoio/memo-client/lib"
 	"github.com/urfave/cli/v2"
@@ -35,7 +36,13 @@ var GetBalanceInfoCmd = &cli.Command{
 			return err
 		}
 
-		balance, err := client.GetBalanceInfo(ctx.Context)
+		buf, err := os.ReadFile("address")
+		if err != nil {
+			return err
+		}
+
+		address := string(buf)
+		balance, err := client.GetBalanceInfo(ctx.Context, address)
 		if err != nil {
 			fmt.Println(err)
 		}

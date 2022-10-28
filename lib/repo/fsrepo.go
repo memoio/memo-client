@@ -7,6 +7,7 @@ import (
 
 	"github.com/memoio/memo-client/lib/backend/keystore"
 	"github.com/memoio/memo-client/lib/types"
+	"github.com/memoio/memo-client/lib/types/store"
 	"github.com/mitchellh/go-homedir"
 	"golang.org/x/xerrors"
 )
@@ -18,8 +19,9 @@ const (
 type FSRepo struct {
 	path string
 
-	keyDs types.KeyStore
-	// lockfile io.Closer
+	keyDs   types.KeyStore
+	metaDs  store.KVStore
+	stateDs store.KVStore
 }
 
 func Exists(repoPath string) (bool, error) {
@@ -139,3 +141,4 @@ func (r *FSRepo) Path() (string, error) {
 func (r *FSRepo) Repo() Repo {
 	return r
 }
+ 

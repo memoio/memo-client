@@ -2,14 +2,24 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"os"
+	"strconv"
+	"strings"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/memoio/memo-client/lib"
+	"github.com/memoio/memo-client/lib/address"
+	"github.com/memoio/memo-client/lib/repo"
+	"github.com/memoio/memo-client/wallet"
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/xerrors"
 )
 
 var PutObjectCmd = &cli.Command{
@@ -17,42 +27,161 @@ var PutObjectCmd = &cli.Command{
 	Usage: "put object",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:    "bucket",
-			Aliases: []string{"bn"},
-			Usage:   "bucketName",
+			Name:     "path",
+			Usage:    "path of file",
+			Required: true,
 		},
-		&cli.StringFlag{
-			Name:    "object",
-			Aliases: []string{"on"},
-			Usage:   "objectName",
-		},
-		&cli.StringFlag{
-			Name:  "path",
-			Usage: "path of file",
+		&cli.Int64Flag{
+			Name:  "time",
+			Usage: "time to storage(day)(min=100, max=1000)",
+			Value: 100,
 		},
 	},
 	Action: func(cctx *cli.Context) error {
-		bucket := cctx.String("bucket")
-		object := cctx.String("object")
-		path := cctx.String("path")
+		// get parameters
+		buf, err := os.ReadFile("address")
+		if err != nil {
+			return err
+		}
 
+		bucket := string(buf)
+		path := cctx.String("path")
+		if path == "" {
+			return xerrors.New("path is nil")
+		}
+
+		date := cctx.Int64("time")
+		if date > 1000 || date < 100 {
+			return xerrors.Errorf("time too long or too short")
+		}
+
+		time := big.NewInt(date * 86400)
 		fileinfo, err := os.Stat(path)
 		if err != nil {
 			return err
 		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		r := bytes.NewBuffer(data)
 
 		client, err := lib.New()
 		if err != nil {
 			return err
 		}
 
-		info, err := client.PutObject(cctx.Context, bucket, object, r, fileinfo.Size(), miniogo.PutObjectOptions{})
+		dc, pc, err := client.GetDCAndPC(cctx.Context, bucket)
+		if err != nil {
+			return err
+		}
+
+		price, err := client.QueryPrice(cctx.Context)
+		if err != nil {
+			fmt.Println(err)
+		}
+		segment := fileinfo.Size() * int64(dc+pc)
+
+		pr := new(big.Int)
+		pr.SetString(price, 10)
+
+		size := big.NewInt(segment)
+		// calculate amount
+		amount := new(big.Int)
+		amount.Mul(pr, time)
+		amount.Mul(amount, size)
+		amount.Div(amount, big.NewInt(248000))
+		amount.Div(amount, big.NewInt(int64(dc)))
+
+		log.Printf("upload info: size is %dB, time is %dday, cost is %d automemo\n", fileinfo.Size(), date, amount)
+
+		// ask whether to upload
+		upload := false
+
+		for i := 0; i < 3; i++ {
+			res, err := ask4confirm()
+			if err == nil {
+				upload = res
+				break
+			}
+		}
+
+		if !upload {
+			log.Println("cancel upload")
+			return nil
+		}
+
+		// make transcation
+		filemd5, err := fileMD5(path)
+		if err != nil {
+			return err
+		}
+
+		repoDir := cctx.String("repo")
+
+		rep, err := repo.NewFSRepo(repoDir)
+		if err != nil {
+			return nil
+		}
+
+		defer func() {
+			_ = rep.Close()
+		}()
+
+		pw := cctx.String("passwd")
+
+		maddr := ethcommon.HexToAddress(bucket)
+		if err != nil {
+			return nil
+		}
+
+		srcaddr, err := address.NewAddress(maddr.Bytes())
+		if err != nil {
+			return err
+		}
+
+		w := wallet.New(pw, rep.KeyStore())
+
+		// get sk
+		sks, err := w.WalletExport(cctx.Context, srcaddr, "")
+		if err != nil {
+			return err
+		}
+
+		sk := hex.EncodeToString(sks.SecretKey)
+
+		tshash, err := lib.Signmsg(cctx.Context, sk, *amount, lib.USERADDRESS, filemd5)
+		if err != nil {
+			return err
+		}
+
+		log.Println(fileinfo.Name())
+		object := fileinfo.Name()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		r := bytes.NewBuffer(data)
+
+		metadata := make(map[string]string)
+
+		signmsg, err := w.WalletSign(cctx.Context, srcaddr, []byte(filemd5))
+		if err != nil {
+			return err
+		}
+		metadata["sign"] = hex.EncodeToString(signmsg)
+		metadata["date"] = strconv.FormatInt(date, 10)
+
+		tsbyte, err := tshash.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		metadata["transcation"] = hex.EncodeToString(tsbyte)
+
+		log.Println("metadata: ", metadata)
+		log.Printf("MD5: %x\n", filemd5)
+
+		opt := miniogo.PutObjectOptions{
+			UserMetadata:     metadata,
+			DisableMultipart: true,
+		}
+
+		info, err := client.PutObject(cctx.Context, bucket, object, r, fileinfo.Size(), opt)
 		if err != nil {
 			return err
 		}
@@ -67,11 +196,6 @@ var GetObjectCmd = &cli.Command{
 	Usage: "get object",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:    "bucket",
-			Aliases: []string{"bn"},
-			Usage:   "bucketName",
-		},
-		&cli.StringFlag{
 			Name:    "object",
 			Aliases: []string{"on"},
 			Usage:   "objectName",
@@ -82,7 +206,12 @@ var GetObjectCmd = &cli.Command{
 		},
 	},
 	Action: func(cctx *cli.Context) error {
-		bucket := cctx.String("bucket")
+		buf, err := os.ReadFile("address")
+		if err != nil {
+			return err
+		}
+
+		bucket := string(buf)
 		object := cctx.String("object")
 		path := cctx.String("path")
 
@@ -91,7 +220,12 @@ var GetObjectCmd = &cli.Command{
 			return err
 		}
 
-		data, err := client.GetObject(cctx.Context, bucket, object, miniogo.GetObjectOptions{})
+		header := make(map[string]string)
+
+		header["test"] = "test"
+
+		opts := miniogo.GetObjectOptions{}
+		data, err := client.GetObject(cctx.Context, bucket, object, opts)
 		if err != nil {
 			log.Println(err)
 		}
@@ -108,4 +242,59 @@ var GetObjectCmd = &cli.Command{
 
 		return nil
 	},
+}
+
+var ListObjectCmd = &cli.Command{
+	Name:  "list",
+	Usage: "list objects",
+	Action: func(ctx *cli.Context) error {
+		buf, err := os.ReadFile("address")
+		if err != nil {
+			return err
+		}
+
+		bucket := string(buf)
+
+		client, err := lib.New()
+		if err != nil {
+			return err
+		}
+
+		objects := client.ListObjects(ctx.Context, bucket, miniogo.ListObjectsOptions{})
+		for ob := range objects {
+			fmt.Println(ob.Key)
+		}
+
+		return nil
+	},
+}
+
+func fileMD5(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+
+	hash := md5.New()
+	_, _ = io.Copy(hash, file)
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func ask4confirm() (bool, error) {
+	var s string
+
+	fmt.Printf("whether to upload(y/N): ")
+	_, err := fmt.Scan(&s)
+	if err != nil {
+		return false, err
+	}
+
+	s = strings.TrimSpace(s)
+	s = strings.ToLower(s)
+
+	if s == "y" || s == "yes" {
+		return true, nil
+	}
+	return false, nil
 }
