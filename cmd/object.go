@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"strconv"
 	"strings"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
@@ -60,33 +59,31 @@ var PutObjectCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
+		ssize := big.NewInt(fileinfo.Size())
 
 		client, err := lib.New()
 		if err != nil {
 			return err
 		}
 
-		dc, pc, err := client.GetDCAndPC(cctx.Context, bucket)
-		if err != nil {
-			return err
-		}
-
-		price, err := client.QueryPrice(cctx.Context)
+		price, err := client.QueryPrice(cctx.Context, bucket, ssize.String(), time.String())
 		if err != nil {
 			fmt.Println(err)
 		}
-		segment := fileinfo.Size() * int64(dc+pc)
 
-		pr := new(big.Int)
-		pr.SetString(price, 10)
-
-		size := big.NewInt(segment)
-		// calculate amount
 		amount := new(big.Int)
-		amount.Mul(pr, time)
-		amount.Mul(amount, size)
-		amount.Div(amount, big.NewInt(248000))
-		amount.Div(amount, big.NewInt(int64(dc)))
+		amount.SetString(price, 10)
+
+		balance, err := client.GetBalanceInfo(cctx.Context, bucket)
+		if err != nil {
+			return err
+		}
+		balancei := new(big.Int)
+		balancei.SetString(balance, 10)
+
+		if balancei.Cmp(amount) < 0 {
+			return xerrors.Errorf("balance not enough, amount: %d, balance: %d", amount, balancei)
+		}
 
 		log.Printf("upload info: size is %dB, time is %dday, cost is %d automemo\n", fileinfo.Size(), date, amount)
 
@@ -134,6 +131,7 @@ var PutObjectCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
+		log.Println("srcaddr ", srcaddr)
 
 		w := wallet.New(pw, rep.KeyStore())
 
@@ -145,7 +143,32 @@ var PutObjectCmd = &cli.Command{
 
 		sk := hex.EncodeToString(sks.SecretKey)
 
-		tshash, err := lib.Signmsg(cctx.Context, sk, *amount, lib.USERADDRESS, filemd5)
+		tokenaddr, err := client.GetTokenAddress(cctx.Context)
+		if err != nil {
+			return err
+		}
+
+		taddr, err := client.GetGatewayAddress(cctx.Context)
+		if err != nil {
+			return err
+		}
+
+		tokenaddress := ethcommon.HexToAddress(tokenaddr)
+		toaddress := ethcommon.HexToAddress(taddr)
+		log.Println(toaddress)
+
+		tshash, err := lib.Approve(cctx.Context, sk, tokenaddress, toaddress, amount)
+		if err != nil {
+			return err
+		}
+		tsbyte, err := tshash.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		ts := hex.EncodeToString(tsbyte)
+		log.Println(ts)
+
+		err = client.Approve(cctx.Context, ts, bucket)
 		if err != nil {
 			return err
 		}
@@ -165,13 +188,7 @@ var PutObjectCmd = &cli.Command{
 			return err
 		}
 		metadata["sign"] = hex.EncodeToString(signmsg)
-		metadata["date"] = strconv.FormatInt(date, 10)
-
-		tsbyte, err := tshash.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		metadata["transcation"] = hex.EncodeToString(tsbyte)
+		metadata["date"] = time.String()
 
 		log.Println("metadata: ", metadata)
 		log.Printf("MD5: %x\n", filemd5)

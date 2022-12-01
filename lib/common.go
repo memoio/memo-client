@@ -42,11 +42,11 @@ func New() (*miniogo.Client, error) {
 }
 
 func Signmsg(ctx context.Context, sk string, value big.Int, destaddr string, filemd5 string) (*types.Transaction, error) {
-	endpoint := ENDPOINT
-	client, err := ethclient.Dial(endpoint)
+	client, err := ethclient.Dial(ENDPOINT)
 	if err != nil {
 		return nil, err
 	}
+	defer client.Close()
 
 	privateKey, err := crypto.HexToECDSA(sk)
 	if err != nil {
@@ -134,6 +134,70 @@ func Signmsg(ctx context.Context, sk string, value big.Int, destaddr string, fil
 	// log.Printf("tx sent: %s\n", signedTx.Hash().Hex())
 
 	// WaitTx(endpoint, signedTx.Hash())
+	return signedTx, nil
+}
+
+func Approve(ctx context.Context, sk string, tokenaddr, destaddr common.Address, value *big.Int) (*types.Transaction, error) {
+	client, err := ethclient.Dial(ENDPOINT)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	privateKey, err := crypto.HexToECDSA(sk)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, xerrors.New("key type not right")
+	}
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	nonce, err := client.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	sendvalue := big.NewInt(0)
+	gasPrice := big.NewInt(1000)
+
+	log.Println("erc20 token addr:", tokenaddr)
+
+	approveFnSignature := []byte("approve(address,uint256)")
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(approveFnSignature)
+	methodID := hash.Sum(nil)[:4] 
+
+	log.Println("padding address..")
+	paddedAddress := common.LeftPadBytes(destaddr.Bytes(), 32)
+
+	paddedAmount := common.LeftPadBytes(value.Bytes(), 32)
+
+	log.Println("constructing tx data..")
+	var data []byte
+	data = append(data, methodID...)
+	data = append(data, paddedAddress...)
+	data = append(data, paddedAmount...)
+
+	gasLimit := uint64(300000)
+	tx := types.NewTransaction(nonce, tokenaddr, sendvalue, gasLimit, gasPrice, data)
+
+	chainID, err := client.NetworkID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.Println("chainID: ", chainID)
+
+	log.Println("signing tx..")
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		return nil, err
+	}
+
 	return signedTx, nil
 }
 

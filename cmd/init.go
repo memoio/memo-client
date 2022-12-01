@@ -7,13 +7,11 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/memoio/memo-client/lib"
 	"github.com/memoio/memo-client/lib/crypto/signature"
 	"github.com/memoio/memo-client/lib/repo"
 	"github.com/memoio/memo-client/lib/types"
 	"github.com/memoio/memo-client/lib/utils"
 	"github.com/memoio/memo-client/wallet"
-	"github.com/minio/minio-go/v7"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
 	"lukechampine.com/blake3"
@@ -125,18 +123,18 @@ func create(ctx context.Context, r repo.Repo, password, sk string) error {
 
 	log.Println("genenrated bls key: ", blsAddr.String())
 
-	log.Println("init bucket")
-	client, err := lib.New()
-	if err != nil {
-		return err
-	}
+	// log.Println("init bucket")
+	// client, err := lib.New()
+	// if err != nil {
+	// 	return err
+	// }
 
-	log.Println(wa.String())
-	err = client.MakeBucket(ctx, wa.String(), minio.MakeBucketOptions{})
-	if err != nil {
-		log.Println(err)
-		return err
-	}
+	// log.Println(wa.String())
+	// err = client.MakeBucket(ctx, wa.String(), minio.MakeBucketOptions{})
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return err
+	// }
 
 	return nil
 }

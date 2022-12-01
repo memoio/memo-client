@@ -1,9 +1,15 @@
 package cmd
 
 import (
+	"encoding/hex"
 	"fmt"
+	"log"
+	"math/big"
+	"os"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/memoio/memo-client/lib"
+	"github.com/memoio/memo-client/lib/address"
 	"github.com/memoio/memo-client/lib/repo"
 	"github.com/memoio/memo-client/wallet"
 	"github.com/urfave/cli/v2"
@@ -13,7 +19,7 @@ var WalletCmd = &cli.Command{
 	Name: "wallet",
 	Subcommands: []*cli.Command{
 		WalletListCmd,
-		// WalletSendCmd,
+		WalletApproveCmd,
 	},
 }
 
@@ -45,6 +51,94 @@ var WalletListCmd = &cli.Command{
 				toAddress := ethcommon.BytesToAddress(as.Bytes())
 				fmt.Println(toAddress)
 			}
+		}
+
+		return nil
+	},
+}
+
+var WalletApproveCmd = &cli.Command{
+	Name:  "approve",
+	Usage: "pay fee",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "taddr",
+			Usage: "approve amount to addr",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		taddr := cctx.String("taddr")
+
+		buf, err := os.ReadFile("address")
+		if err != nil {
+			return err
+		}
+
+		bucket := string(buf)
+
+		repoDir := cctx.String("repo")
+
+		rep, err := repo.NewFSRepo(repoDir)
+		if err != nil {
+			return nil
+		}
+
+		defer func() {
+			_ = rep.Close()
+		}()
+
+		pw := cctx.String("passwd")
+
+		w := wallet.New(pw, rep.KeyStore())
+
+		maddr := ethcommon.HexToAddress(bucket)
+		if err != nil {
+			return nil
+		}
+
+		srcaddr, err := address.NewAddress(maddr.Bytes())
+		if err != nil {
+			return err
+		}
+
+		// get sk
+		sks, err := w.WalletExport(cctx.Context, srcaddr, "")
+		if err != nil {
+			return err
+		}
+
+		sk := hex.EncodeToString(sks.SecretKey)
+
+		client, err := lib.New()
+		if err != nil {
+			return err
+		}
+
+		tokenaddr, err := client.GetTokenAddress(cctx.Context)
+		if err != nil {
+			return err
+		}
+		log.Println(tokenaddr)
+
+		tokenaddress := ethcommon.HexToAddress(tokenaddr)
+		toaddress := ethcommon.HexToAddress(taddr)
+
+		value := big.NewInt(150503225806451)
+		tshash, err := lib.Approve(cctx.Context, sk, tokenaddress, toaddress, value)
+		if err != nil {
+			return err
+		}
+
+		tsbyte, err := tshash.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		ts := hex.EncodeToString(tsbyte)
+		log.Println(ts)
+
+		err = client.Approve(cctx.Context, ts, bucket)
+		if err != nil {
+			return err
 		}
 
 		return nil
