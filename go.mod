@@ -51,4 +51,4 @@ require (
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
 
-replace github.com/minio/minio-go/v7 => /home/hekai/memoio/minio-go
+replace github.com/minio/minio-go/v7 => ../minio-go

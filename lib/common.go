@@ -19,7 +19,7 @@ import (
 )
 
 const USERADDRESS = "0x7A2994d6e1b8E5889Cc96664cF9873BFf33F8deD"
-const ENDPOINT = "https://devchain.metamemo.one:8501"
+const ENDPOINT = "https://chain.metamemo.one:8501"
 
 var (
 	AccessKey string
@@ -170,7 +170,7 @@ func Approve(ctx context.Context, sk string, tokenaddr, destaddr common.Address,
 	approveFnSignature := []byte("approve(address,uint256)")
 	hash := sha3.NewLegacyKeccak256()
 	hash.Write(approveFnSignature)
-	methodID := hash.Sum(nil)[:4] 
+	methodID := hash.Sum(nil)[:4]
 
 	log.Println("padding address..")
 	paddedAddress := common.LeftPadBytes(destaddr.Bytes(), 32)

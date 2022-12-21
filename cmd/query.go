@@ -19,10 +19,9 @@ var QueryCmd = &cli.Command{
 			Usage: "time to storage(day)(min=100, max=1000)",
 			Value: 100,
 		},
-		&cli.Int64Flag{
-			Name:  "size",
-			Usage: "storage size(B)",
-			Value: 200,
+		&cli.StringFlag{
+			Name:  "path",
+			Usage: "path of file",
 		},
 	},
 	Action: func(cctx *cli.Context) error {
@@ -37,19 +36,29 @@ var QueryCmd = &cli.Command{
 
 		bucket := string(buf)
 
+		path := cctx.String("path")
+		if path == "" {
+			return xerrors.New("path is nil")
+		}
+
+		fileinfo, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+
 		date := cctx.Int64("time")
 		if date > 1000 || date < 100 {
 			return xerrors.Errorf("time too long or too short")
 		}
-		time := big.NewInt(date * 86400)
+		time := big.NewInt(date)
 
-		size := big.NewInt(cctx.Int64("size"))
+		size := big.NewInt(fileinfo.Size())
 
 		price, err := client.QueryPrice(cctx.Context, bucket, size.String(), time.String())
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Println(price)
+		fmt.Printf("%s automemo\n", price)
 
 		return nil
 	},
@@ -74,7 +83,7 @@ var GetBalanceInfoCmd = &cli.Command{
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Println(balance)
+		fmt.Printf("%s automemo\n", balance)
 
 		return nil
 	},

@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/memoio/memo-client/lib"
 	"github.com/memoio/memo-client/lib/address"
 	"github.com/memoio/memo-client/lib/repo"
@@ -54,7 +56,8 @@ var PutObjectCmd = &cli.Command{
 			return xerrors.Errorf("time too long or too short")
 		}
 
-		time := big.NewInt(date * 86400)
+		dated := big.NewInt(date)
+
 		fileinfo, err := os.Stat(path)
 		if err != nil {
 			return err
@@ -66,7 +69,7 @@ var PutObjectCmd = &cli.Command{
 			return err
 		}
 
-		price, err := client.QueryPrice(cctx.Context, bucket, ssize.String(), time.String())
+		price, err := client.QueryPrice(cctx.Context, bucket, ssize.String(), dated.String())
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -103,12 +106,6 @@ var PutObjectCmd = &cli.Command{
 			return nil
 		}
 
-		// make transcation
-		filemd5, err := fileMD5(path)
-		if err != nil {
-			return err
-		}
-
 		repoDir := cctx.String("repo")
 
 		rep, err := repo.NewFSRepo(repoDir)
@@ -141,37 +138,24 @@ var PutObjectCmd = &cli.Command{
 			return err
 		}
 
+		log.Printf("%x\n", string(sks.SecretKey))
 		sk := hex.EncodeToString(sks.SecretKey)
 
-		tokenaddr, err := client.GetTokenAddress(cctx.Context)
+		privateKey, err := crypto.HexToECDSA(sk)
 		if err != nil {
-			return err
+			log.Fatal(err)
 		}
 
-		taddr, err := client.GetGatewayAddress(cctx.Context)
+		sdata := []byte(dated.String())
+		hash := crypto.Keccak256Hash(sdata)
+		log.Println(hash.Hex())
+
+		signature, err := crypto.Sign(hash.Bytes(), privateKey)
 		if err != nil {
-			return err
+			log.Fatal(err)
 		}
 
-		tokenaddress := ethcommon.HexToAddress(tokenaddr)
-		toaddress := ethcommon.HexToAddress(taddr)
-		log.Println(toaddress)
-
-		tshash, err := lib.Approve(cctx.Context, sk, tokenaddress, toaddress, amount)
-		if err != nil {
-			return err
-		}
-		tsbyte, err := tshash.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		ts := hex.EncodeToString(tsbyte)
-		log.Println(ts)
-
-		err = client.Approve(cctx.Context, ts, bucket)
-		if err != nil {
-			return err
-		}
+		log.Println("sign: ", hexutil.Encode(signature))
 
 		log.Println(fileinfo.Name())
 		object := fileinfo.Name()
@@ -183,15 +167,10 @@ var PutObjectCmd = &cli.Command{
 
 		metadata := make(map[string]string)
 
-		signmsg, err := w.WalletSign(cctx.Context, srcaddr, []byte(filemd5))
-		if err != nil {
-			return err
-		}
-		metadata["sign"] = hex.EncodeToString(signmsg)
-		metadata["date"] = time.String()
+		metadata["sign"] = hexutil.Encode(signature)
+		metadata["date"] = dated.String()
 
 		log.Println("metadata: ", metadata)
-		log.Printf("MD5: %x\n", filemd5)
 
 		opt := miniogo.PutObjectOptions{
 			UserMetadata:     metadata,
@@ -247,7 +226,7 @@ var GetObjectCmd = &cli.Command{
 			log.Println(err)
 		}
 
-		fr, err := os.Open(path)
+		fr, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
@@ -255,7 +234,7 @@ var GetObjectCmd = &cli.Command{
 
 		if _, err := io.Copy(fr, data); err != nil {
 			return err
-		}
+		}  
 
 		return nil
 	},
